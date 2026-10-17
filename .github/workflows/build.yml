@@ -1,0 +1,61 @@
+name: Build BigMod
+
+# Builds the Windows and macOS plug-ins on GitHub's computers.
+# Push this project to a GitHub repository, open the "Actions" tab, pick the
+# latest run and download "BigMod-Windows" / "BigMod-macOS" at the bottom.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+            cmake_args: -G "Visual Studio 17 2022" -A x64
+          - name: macOS
+            os: macos-latest
+            cmake_args: -G Xcode -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+
+    runs-on: ${{ matrix.os }}
+    name: ${{ matrix.name }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        shell: bash
+        run: cmake -B build ${{ matrix.cmake_args }} -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        shell: bash
+        run: cmake --build build --config Release --parallel 4
+
+      - name: Collect plug-ins
+        shell: bash
+        run: |
+          mkdir -p dist
+          for t in BigModFx BigModInst; do
+            cp -R build/${t}_artefacts/Release/VST3/*.vst3 dist/
+            if [ -d build/${t}_artefacts/Release/AU ]; then cp -R build/${t}_artefacts/Release/AU/*.component dist/; fi
+            mkdir -p dist/Standalone
+            cp -R build/${t}_artefacts/Release/Standalone/* dist/Standalone/
+          done
+          cp README.md dist/
+
+      - name: Ad-hoc sign (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          for p in dist/*.vst3 dist/*.component dist/Standalone/*.app; do
+            codesign --force --deep --sign - "$p"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BigMod-${{ matrix.name }}
+          path: dist
